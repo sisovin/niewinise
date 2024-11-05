@@ -2,9 +2,7 @@ import gradio as gr
 import os
 import json
 import requests
-from PIL import Image
-from io import BytesIO
-import base64
+from functions.logger import Logger
 
 # Set memory management for PyTorch
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'  # or adjust size as needed
@@ -24,25 +22,27 @@ else:
 
 api_base = 'http://localhost:11434/api/generate'
 
+# Ensure the logs directory exists
+log_dir = 'logs'
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# Initialize the Logger
+logger = Logger(log_file=os.path.join(log_dir, 'logfile.log'), level=Logger.LEVEL_INFO)
+
 # Visual theme
 visual_theme = gr.themes.Default()  # Default, Soft or Monochrome
 
 # Constants
 MAX_OUTPUT_TOKENS = 2048
-MAX_IMAGE_SIZE = (1120, 1120)
 
-# Function to process the image and generate a description
-def describe_image(image, user_prompt, temperature, top_k, top_p, max_tokens, history):
-    # Resize image if necessary
-    image = image.resize(MAX_IMAGE_SIZE)
-
-    # Convert image to base64
-    buffered = BytesIO()
-    image.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
+# Function to generate a response based on user input
+def generate_response(user_prompt, top_k, top_p, max_tokens, history):
+    # Log the user prompt
+    logger.info(f"User Prompt: {user_prompt}")
 
     # Prepare the prompt
-    prompt = f"<|image|>{img_str}<|begin_of_text|>{user_prompt} Answer:"
+    prompt = f"{user_prompt} Answer:"
 
     # Prepare the data for the API request
     data = {
@@ -57,11 +57,11 @@ def describe_image(image, user_prompt, temperature, top_k, top_p, max_tokens, hi
 
     # Check for 404 error
     if response.status_code == 404:
-        print("Error: API endpoint not found.")
+        logger.error("Error: API endpoint not found.")
         return history
 
     # Print the response text for debugging
-    print("API Response Text:", response.text)
+    # logger.info(f"API Response Text: {response.text}")
 
     # Process each JSON object in the response
     cleaned_output = ""
@@ -70,12 +70,15 @@ def describe_image(image, user_prompt, temperature, top_k, top_p, max_tokens, hi
             response_data = json.loads(line)
             cleaned_output += response_data.get('response', '')
         except json.JSONDecodeError as e:
-            print("JSON Decode Error:", e)
+            logger.error(f"JSON Decode Error: {e}")
             continue
 
     # Ensure the prompt is not repeated in the output
     if cleaned_output.startswith(user_prompt):
         cleaned_output = cleaned_output[len(user_prompt):].strip()
+
+    # Log the chatbot response
+    logger.info(f"Chatbot Response: {cleaned_output}")
 
     # Append the new conversation to the history
     history.append({"role": "user", "content": user_prompt})
@@ -93,32 +96,20 @@ def gradio_interface():
         gr.HTML(
         """
     <h1 style='text-align: center'>
-    Clean-UI
+    Niewinise Chatbot
     </h1>
     """)
         with gr.Row():
-            # Left column with image and parameter inputs
-            with gr.Column(scale=1):
-                image_input = gr.Image(
-                    label="Image", 
-                    type="pil", 
-                    image_mode="RGB", 
-                    height=512,  # Set the height
-                    width=512   # Set the width
-                )
-
-                # Parameter sliders
-                temperature = gr.Slider(
-                    label="Temperature", minimum=0.1, maximum=2.0, value=0.6, step=0.1, interactive=True)
-                top_k = gr.Slider(
-                    label="Top-k", minimum=1, maximum=100, value=50, step=1, interactive=True)
-                top_p = gr.Slider(
-                    label="Top-p", minimum=0.1, maximum=1.0, value=0.9, step=0.1, interactive=True)
-                max_tokens = gr.Slider(
-                    label="Max Tokens", minimum=50, maximum=MAX_OUTPUT_TOKENS, value=100, step=50, interactive=True)
-
             # Right column with the chat interface
             with gr.Column(scale=2):
+                # Parameter sliders
+                top_k = gr.Slider(
+                  label="Top-k", minimum=1, maximum=100, value=50, step=1, interactive=True)
+                top_p = gr.Slider(
+                  label="Top-p", minimum=0.1, maximum=1.0, value=0.9, step=0.1, interactive=True)
+                max_tokens = gr.Slider(
+                  label="Max Tokens", minimum=50, maximum=MAX_OUTPUT_TOKENS, value=100, step=50, interactive=True)
+                            
                 chat_history = gr.Chatbot(label="Chat", height=512, type='messages')
 
                 # User input box for prompt
@@ -128,7 +119,7 @@ def gradio_interface():
                     placeholder="Enter your prompt", 
                     lines=2
                 )
-
+               
                 # Generate and Clear buttons
                 with gr.Row():
                     generate_button = gr.Button("Generate")
@@ -136,8 +127,9 @@ def gradio_interface():
 
                 # Define the action for the generate button
                 generate_button.click(
-                    fn=describe_image, 
-                    inputs=[image_input, user_prompt, temperature, top_k, top_p, max_tokens, chat_history],
+                    fn=generate_response, 
+                    inputs=[user_prompt, top_k, top_p, max_tokens, chat_history],
+                    # inputs=[user_prompt, chat_history],
                     outputs=[chat_history]
                 )
 

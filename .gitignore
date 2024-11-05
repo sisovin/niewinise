@@ -1,0 +1,8 @@
+venv
+.env
+.gradio
+__pycache__
+node_modules
+git-how-todo.md
+clean-ui.py
+img
